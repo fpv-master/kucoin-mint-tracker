@@ -32,7 +32,11 @@ bot.on('message', (msg) => {
 
   if (activeWatchers.has(wallet)) return;
 
-  bot.sendMessage(CHAT_ID, `🧭 Внимание, ${label} готовит монету\n💰 Адрес: <code>${wallet}</code>`, { parse_mode: 'HTML' });
+  bot.sendMessage(CHAT_ID,
+    `⚠️ [${label}] Обнаружен перевод ${label === 'Кук 3' ? '68.99' : '99.99'} SOL\n` +
+    `💰 Адрес: <code>${wallet}</code>\n` +
+    `⏳ Ожидаем mint...`, { parse_mode: 'HTML' });
+
   watchMint(wallet, label);
 });
 
@@ -58,6 +62,7 @@ function watchMint(wallet, label) {
       const msg = JSON.parse(data);
       const logs = msg?.params?.result?.value?.logs || [];
       const sig = msg?.params?.result?.value?.signature;
+      const mentions = msg?.params?.result?.value?.mentions || [];
       if (!sig || seenSignatures.has(sig)) return;
 
       const found = logs.find((log) =>
@@ -65,11 +70,17 @@ function watchMint(wallet, label) {
       );
       if (!found) return;
 
+      const mintAddress = mentions?.[0] || 'неизвестен';
       seenSignatures.add(sig);
-      bot.sendMessage(CHAT_ID, `⚡️ ${label}: Mint обнаружен\n🔗 https://solscan.io/tx/${sig}`, { parse_mode: 'HTML' });
+      bot.sendMessage(CHAT_ID,
+        `🚀 [${label}] Mint обнаружен!\n` +
+        `🪙 Контракт токена: <code>${mintAddress}</code>`, { parse_mode: 'HTML' });
+
       ws.close();
       activeWatchers.delete(wallet);
-    } catch {}
+    } catch (e) {
+      console.log('⚠️ Ошибка обработки сообщения:', e.message);
+    }
   });
 
   ws.on('close', () => {
