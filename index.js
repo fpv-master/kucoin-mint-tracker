@@ -15,10 +15,11 @@ bot.on('message', (msg) => {
   const text = msg.text;
   if (!text || !text.includes('Кукоин Биржа') || !text.includes('99.99 SOL')) return;
 
-  const addressMatch = text.match(/На: (\w{32,44})/);
-  if (!addressMatch) return;
+  // 💡 Поддержка Solscan-ссылок
+  const linkMatch = text.match(/solscan\.io\/account\/(\w{32,44})/);
+  const wallet = linkMatch?.[1];
+  if (!wallet) return;
 
-  const wallet = addressMatch[1];
   if (activeWatchers.has(wallet)) return;
 
   bot.sendMessage(CHAT_ID, `🧭 Внимание, KuCoin готовит монету\n💰 Адрес: <code>${wallet}</code>`, { parse_mode: 'HTML' });
