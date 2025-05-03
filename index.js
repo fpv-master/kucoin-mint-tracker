@@ -1,8 +1,9 @@
-import dotenv from 'dotenv';
+
+const dotenv = require('dotenv');
 dotenv.config();
 
-import TelegramBot from 'node-telegram-bot-api';
-import WebSocket from 'ws';
+const TelegramBot = require('node-telegram-bot-api');
+const WebSocket = require('ws');
 
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
 const HELIUS_KEY = process.env.HELIUS_API_KEY;
@@ -54,13 +55,14 @@ function watchMint(wallet, label) {
     }
   }, 20 * 60 * 60 * 1000); // 20 часов
 
+  const pingInterval = setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.ping();
+      console.log('📡 Sent ping');
+    }
+  }, 50 * 1000);
+
   ws.on('open', () => {
-    const pingInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.ping();
-        console.log('📡 Sent ping');
-      }
-    }, 50000);
     console.log(`✅ [${label}] Listening for mint on ${wallet}`);
     ws.send(JSON.stringify({
       jsonrpc: '2.0',
@@ -90,6 +92,7 @@ function watchMint(wallet, label) {
       seenSignatures.add(sig);
 
       clearTimeout(timeout);
+      clearInterval(pingInterval);
 
       bot.sendMessage(PRIVATE_CHAT_ID,
         `🚀 [${label}] Mint обнаружен!\n` +
@@ -103,8 +106,8 @@ function watchMint(wallet, label) {
   });
 
   ws.on('close', () => {
-    clearInterval(pingInterval);
     console.log(`❌ [${label}] WebSocket closed for ${wallet}`);
+    clearInterval(pingInterval);
     activeWatchers.delete(wallet);
   });
 
