@@ -81,7 +81,7 @@ function watchMint(wallet, label, timeoutMs, targetChatId) {
       ws.ping();
       console.log('📡 Sent ping');
     }
-  }, 50000);
+  }, 250000);
 
   ws.on('open', () => {
     console.log(`✅ [${label}] Listening for mint on ${wallet}`);
