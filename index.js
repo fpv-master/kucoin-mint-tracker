@@ -13,25 +13,35 @@ const seenSignatures = new Set();
 
 bot.on('message', (msg) => {
   const text = msg.text;
-  if (!text || !text.includes('Кукоин Биржа') || !text.includes('99.99 SOL')) return;
+  if (!text) return;
 
-  // 💡 Поддержка Solscan-ссылок
+  // 🧠 Проверяем текст и сумму
+  let label = null;
+  if (text.includes('Кукоин Биржа') && text.includes('99.99 SOL')) {
+    label = 'Кукоин 1';
+  } else if (text.includes('Кукоин 50') && text.includes('68.99 SOL')) {
+    label = 'Кук 3';
+  }
+
+  if (!label) return;
+
+  // 🔗 Ищем адрес в ссылке на solscan
   const linkMatch = text.match(/solscan\.io\/account\/(\w{32,44})/);
   const wallet = linkMatch?.[1];
   if (!wallet) return;
 
   if (activeWatchers.has(wallet)) return;
 
-  bot.sendMessage(CHAT_ID, `🧭 Внимание, KuCoin готовит монету\n💰 Адрес: <code>${wallet}</code>`, { parse_mode: 'HTML' });
-  watchMint(wallet);
+  bot.sendMessage(CHAT_ID, `🧭 Внимание, ${label} готовит монету\n💰 Адрес: <code>${wallet}</code>`, { parse_mode: 'HTML' });
+  watchMint(wallet, label);
 });
 
-function watchMint(wallet) {
+function watchMint(wallet, label) {
   const ws = new WebSocket(`wss://rpc.helius.xyz/?api-key=${HELIUS_KEY}`);
   activeWatchers.set(wallet, ws);
 
   ws.on('open', () => {
-    console.log(`✅ Listening for mint on ${wallet}`);
+    console.log(`✅ [${label}] Listening for mint on ${wallet}`);
     ws.send(JSON.stringify({
       jsonrpc: '2.0',
       id: 1,
@@ -56,14 +66,14 @@ function watchMint(wallet) {
       if (!found) return;
 
       seenSignatures.add(sig);
-      bot.sendMessage(CHAT_ID, `⚡️ Mint обнаружен\n🔗 https://solscan.io/tx/${sig}`, { parse_mode: 'HTML' });
+      bot.sendMessage(CHAT_ID, `⚡️ ${label}: Mint обнаружен\n🔗 https://solscan.io/tx/${sig}`, { parse_mode: 'HTML' });
       ws.close();
       activeWatchers.delete(wallet);
     } catch {}
   });
 
   ws.on('close', () => {
-    console.log(`❌ WebSocket closed for ${wallet}`);
+    console.log(`❌ [${label}] WebSocket closed for ${wallet}`);
     activeWatchers.delete(wallet);
   });
 
