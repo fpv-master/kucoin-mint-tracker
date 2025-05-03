@@ -6,14 +6,17 @@ import WebSocket from 'ws';
 
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
 const HELIUS_KEY = process.env.HELIUS_API_KEY;
-const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+
+const PUBLIC_GROUP_ID = process.env.PUBLIC_CHAT_ID;   // Группа, откуда слушаем сообщения
+const PRIVATE_CHAT_ID = process.env.PRIVATE_CHAT_ID; // Личный чат, куда шлём уведомления
 
 const activeWatchers = new Map();
 const seenSignatures = new Set();
 
 bot.on('message', (msg) => {
   const text = msg.text;
-  if (!text) return;
+  const senderId = msg.chat.id;
+  if (!text || senderId !== Number(PUBLIC_GROUP_ID)) return;
 
   // 🧠 Проверяем текст и сумму
   let label = null;
@@ -25,14 +28,11 @@ bot.on('message', (msg) => {
 
   if (!label) return;
 
-  // 🔗 Ищем адрес в ссылке на solscan
   const linkMatch = text.match(/solscan\.io\/account\/(\w{32,44})/);
   const wallet = linkMatch?.[1];
-  if (!wallet) return;
+  if (!wallet || activeWatchers.has(wallet)) return;
 
-  if (activeWatchers.has(wallet)) return;
-
-  bot.sendMessage(CHAT_ID,
+  bot.sendMessage(PRIVATE_CHAT_ID,
     `⚠️ [${label}] Обнаружен перевод ${label === 'Кук 3' ? '68.99' : '99.99'} SOL\n` +
     `💰 Адрес: <code>${wallet}</code>\n` +
     `⏳ Ожидаем mint...`, { parse_mode: 'HTML' });
@@ -43,6 +43,16 @@ bot.on('message', (msg) => {
 function watchMint(wallet, label) {
   const ws = new WebSocket(`wss://rpc.helius.xyz/?api-key=${HELIUS_KEY}`);
   activeWatchers.set(wallet, ws);
+
+  const timeout = setTimeout(() => {
+    if (activeWatchers.has(wallet)) {
+      bot.sendMessage(PRIVATE_CHAT_ID,
+        `⌛ [${label}] Mint не обнаружен в течение 20 часов.\n` +
+        `🕳 Отслеживание ${wallet} завершено.`, { parse_mode: 'HTML' });
+      ws.close();
+      activeWatchers.delete(wallet);
+    }
+  }, 20 * 60 * 60 * 1000); // 20 часов
 
   ws.on('open', () => {
     console.log(`✅ [${label}] Listening for mint on ${wallet}`);
@@ -72,7 +82,10 @@ function watchMint(wallet, label) {
 
       const mintAddress = mentions?.[0] || 'неизвестен';
       seenSignatures.add(sig);
-      bot.sendMessage(CHAT_ID,
+
+      clearTimeout(timeout);
+
+      bot.sendMessage(PRIVATE_CHAT_ID,
         `🚀 [${label}] Mint обнаружен!\n` +
         `🪙 Контракт токена: <code>${mintAddress}</code>`, { parse_mode: 'HTML' });
 
