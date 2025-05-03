@@ -1,4 +1,3 @@
-
 const dotenv = require('dotenv');
 dotenv.config();
 
@@ -30,7 +29,7 @@ bot.on('message', (msg) => {
   } else if (text.includes('Кукоин 50') && text.includes('68.99 SOL')) {
     label = 'Кук 3';
     timeoutMs = 20 * 60 * 60 * 1000;
-  } else if (text.includes('Бинанс 99') && (text.includes('99.99') || text.includes('99.999'))) {
+  } else if (text.includes('Бинанс 99') && text.includes('99.99')) {
     label = 'Бинанс 99';
     timeoutMs = 6 * 60 * 60 * 1000;
     targetChatId = BINANCE_CHAT_ID;
@@ -38,26 +37,15 @@ bot.on('message', (msg) => {
 
   if (!label) return;
 
-  // 1. Сначала ищем обычную solscan-ссылку
-  let wallet = null;
   const linkMatch = text.match(/solscan\.io\/account\/(\w{32,44})/);
-  if (linkMatch) {
-    wallet = linkMatch[1];
-  } else if (msg.entities) {
-    // 2. Ищем text_link entity с solscan.io/account
-    const entity = msg.entities.find(e => e.type === 'text_link' && e.url?.includes('solscan.io/account/'));
-    if (entity && entity.url) {
-      const match = entity.url.match(/account\/(\w{32,44})/);
-      wallet = match?.[1];
-    }
-  }
-
+  const wallet = linkMatch?.[1];
   if (!wallet || activeWatchers.has(wallet)) return;
 
   if (label !== 'Бинанс 99') {
     bot.sendMessage(PRIVATE_CHAT_ID,
       `⚠️ [${label}] Обнаружен перевод ${label === 'Кук 3' ? '68.99' : '99.99'} SOL\n` +
-      `💰 Адрес: <code>${wallet}</code>\n⏳ Ожидаем mint...`, { parse_mode: 'HTML' });
+      `💰 Адрес: <code>${wallet}</code>\n` +
+      `⏳ Ожидаем mint...`, { parse_mode: 'HTML' });
   }
 
   watchMint(wallet, label, timeoutMs, targetChatId);
@@ -70,7 +58,8 @@ function watchMint(wallet, label, timeoutMs, targetChatId) {
   const timeout = setTimeout(() => {
     if (activeWatchers.has(wallet)) {
       bot.sendMessage(targetChatId,
-        `⌛ [${label}] Mint не обнаружен в течение ${timeoutMs / 3600000} ч.\n🕳 Отслеживание ${wallet} завершено.`, { parse_mode: 'HTML' });
+        `⌛ [${label}] Mint не обнаружен в течение ${timeoutMs / 3600000} ч.\n` +
+        `🕳 Отслеживание ${wallet} завершено.`, { parse_mode: 'HTML' });
       ws.close();
       activeWatchers.delete(wallet);
     }
@@ -116,7 +105,8 @@ function watchMint(wallet, label, timeoutMs, targetChatId) {
       clearInterval(pingInterval);
 
       bot.sendMessage(targetChatId,
-        `🚀 [${label}] Mint обнаружен!\n🪙 Контракт токена: <code>${mintAddress}</code>`, { parse_mode: 'HTML' });
+        `🚀 [${label}] Mint обнаружен!\n` +
+        `🪙 Контракт токена: <code>${mintAddress}</code>`, { parse_mode: 'HTML' });
 
       ws.close();
       activeWatchers.delete(wallet);
