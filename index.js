@@ -1,101 +1,112 @@
+import dotenv from 'dotenv';
+dotenv.config();
 
-const WebSocket = require('ws');
-const TelegramBot = require('node-telegram-bot-api');
-require('dotenv').config();
+import TelegramBot from 'node-telegram-bot-api';
+import WebSocket from 'ws';
 
-const TOKEN = process.env.TELEGRAM_TOKEN;
-const bot = new TelegramBot(TOKEN, { polling: true });
+const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
+const HELIUS_KEY = process.env.HELIUS_API_KEY;
 
-const PUBLIC_CHAT_ID = process.env.PUBLIC_CHAT_ID;
-const PRIVATE_CHAT_ID = process.env.PRIVATE_CHAT_ID;
-const WATCH_TIMEOUT_MS = 20 * 60 * 60 * 1000; // 20 часов
-const KUCOIN_1_AMOUNT = 99.99;
-const KUCOIN_3_AMOUNT = 68.99;
+const PUBLIC_CHAT_ID = process.env.PUBLIC_CHAT_ID;   // Группа, откуда слушаем сообщения
+const PRIVATE_CHAT_ID = process.env.PRIVATE_CHAT_ID; // Личный чат, куда шлём уведомления
 
-const watchedAddresses = new Map();
+const activeWatchers = new Map();
+const seenSignatures = new Set();
 
-function parseAddressFromText(text) {
-  const regex = /https:\/\/solscan\.io\/account\/([a-zA-Z0-9]+)/;
-  const match = text.match(regex);
-  return match ? match[1] : null;
-}
+bot.on('message', (msg) => {
+  const text = msg.text;
+  const senderId = msg.chat.id;
+  if (!text || senderId !== Number(PUBLIC_CHAT_ID)) return;
 
-bot.on('message', async (msg) => {
-  const chatId = msg.chat.id;
-  if (String(chatId) !== PUBLIC_CHAT_ID) return;
-  if (!msg.text) return;
-
-  const address = parseAddressFromText(msg.text);
-  if (!address) return;
-
-  let devLabel = null;
-  if (msg.text.includes('Кукоин Биржа') && msg.text.includes(KUCOIN_1_AMOUNT.toString())) {
-    devLabel = 'Кукоин 1';
-  } else if (msg.text.includes('Кукоин 50') && msg.text.includes(KUCOIN_3_AMOUNT.toString())) {
-    devLabel = 'Кук 3';
+  // 🧠 Проверяем текст и сумму
+  let label = null;
+  if (text.includes('Кукоин Биржа') && text.includes('99.99 SOL')) {
+    label = 'Кукоин 1';
+  } else if (text.includes('Кукоин 50') && text.includes('68.99 SOL')) {
+    label = 'Кук 3';
   }
 
-  if (!devLabel || watchedAddresses.has(address)) return;
+  if (!label) return;
 
-  watchedAddresses.set(address, true);
-  const notice = `⚠️ [${devLabel}] Обнаружен перевод ${devLabel === 'Кук 3' ? KUCOIN_3_AMOUNT : KUCOIN_1_AMOUNT} SOL\n💰 Адрес:\n\`${address}\`\n⏳ Ожидаем mint...`;
-  await bot.sendMessage(PRIVATE_CHAT_ID, notice, { parse_mode: 'Markdown' });
-  console.log(`✅ [${devLabel}] Listening for mint on ${address}`);
+  const linkMatch = text.match(/solscan\.io\/account\/(\w{32,44})/);
+  const wallet = linkMatch?.[1];
+  if (!wallet || activeWatchers.has(wallet)) return;
 
-  const ws = new WebSocket('wss://mainnet.helius-rpc.com/');
+  bot.sendMessage(PRIVATE_CHAT_ID,
+    `⚠️ [${label}] Обнаружен перевод ${label === 'Кук 3' ? '68.99' : '99.99'} SOL\n` +
+    `💰 Адрес: <code>${wallet}</code>\n` +
+    `⏳ Ожидаем mint...`, { parse_mode: 'HTML' });
+
+  watchMint(wallet, label);
+});
+
+function watchMint(wallet, label) {
+  const ws = new WebSocket(`wss://rpc.helius.xyz/?api-key=${HELIUS_KEY}`);
+  activeWatchers.set(wallet, ws);
+
+  const timeout = setTimeout(() => {
+    if (activeWatchers.has(wallet)) {
+      bot.sendMessage(PRIVATE_CHAT_ID,
+        `⌛ [${label}] Mint не обнаружен в течение 20 часов.\n` +
+        `🕳 Отслеживание ${wallet} завершено.`, { parse_mode: 'HTML' });
+      ws.close();
+      activeWatchers.delete(wallet);
+    }
+  }, 20 * 60 * 60 * 1000); // 20 часов
 
   ws.on('open', () => {
-    ws.send(JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'logsSubscribe',
-      params: [
-        { mentions: [address] },
-        { commitment: 'confirmed' }
-      ]
-    }));
-
-    // Пинг каждые 50 секунд
     const pingInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.ping();
         console.log('📡 Sent ping');
       }
-    }, 50 * 1000);
-
-    // Завершить слежку через 20 часов
-    setTimeout(() => {
-      ws.close();
-      clearInterval(pingInterval);
-      watchedAddresses.delete(address);
-      console.log(`❌ Timeout reached, unsubscribed from ${address}`);
-    }, WATCH_TIMEOUT_MS);
+    }, 50000);
+    console.log(`✅ [${label}] Listening for mint on ${wallet}`);
+    ws.send(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'logsSubscribe',
+      params: [
+        { mentions: [wallet] },
+        { commitment: 'confirmed', encoding: 'jsonParsed' }
+      ]
+    }));
   });
 
-  ws.on('message', async (data) => {
+  ws.on('message', (data) => {
     try {
-      const parsed = JSON.parse(data);
-      const logs = parsed.params?.result?.value?.logs || [];
-      const found = logs.find((line) => line.includes('InitializeMint2'));
-      if (found) {
-        const sig = parsed.params?.result?.value?.signature;
-        const url = `https://solscan.io/tx/${sig}`;
-        const text = `⚡️ New Token Created!\n🔗 [Open TX](${url})\n💰 Минт с адреса: \`${address}\``;
-        await bot.sendMessage(PRIVATE_CHAT_ID, text, { parse_mode: 'Markdown' });
-        console.log(`✅ Mint found! ${sig}`);
-        ws.close();
-        watchedAddresses.delete(address);
-      }
+      const msg = JSON.parse(data);
+      const logs = msg?.params?.result?.value?.logs || [];
+      const sig = msg?.params?.result?.value?.signature;
+      const mentions = msg?.params?.result?.value?.mentions || [];
+      if (!sig || seenSignatures.has(sig)) return;
+
+      const found = logs.find((log) =>
+        log.includes('InitializeMint') || log.includes('InitializeMint2')
+      );
+      if (!found) return;
+
+      const mintAddress = mentions?.[0] || 'неизвестен';
+      seenSignatures.add(sig);
+
+      clearTimeout(timeout);
+
+      bot.sendMessage(PRIVATE_CHAT_ID,
+        `🚀 [${label}] Mint обнаружен!\n` +
+        `🪙 Контракт токена: <code>${mintAddress}</code>`, { parse_mode: 'HTML' });
+
+      ws.close();
+      activeWatchers.delete(wallet);
     } catch (e) {
-      console.warn('Error parsing message:', e);
+      console.log('⚠️ Ошибка обработки сообщения:', e.message);
     }
   });
 
   ws.on('close', () => {
-    console.log(`❌ WebSocket closed for ${address}`);
+    clearInterval(pingInterval);
+    console.log(`❌ [${label}] WebSocket closed for ${wallet}`);
+    activeWatchers.delete(wallet);
   });
 
-  ws.on('error', (err) => {
-    console.error(`💥 WebSocket error for ${address}:`, err.message);
-  });
-});
+  ws.on('error', (e) => console.log(`💥 WebSocket error: ${e.message}`));
+}
