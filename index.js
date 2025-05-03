@@ -1,4 +1,3 @@
-
 const dotenv = require('dotenv');
 dotenv.config();
 
@@ -8,8 +7,9 @@ const WebSocket = require('ws');
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
 const HELIUS_KEY = process.env.HELIUS_API_KEY;
 
-const PUBLIC_CHAT_ID = process.env.PUBLIC_CHAT_ID;   // Группа, откуда слушаем сообщения
-const PRIVATE_CHAT_ID = process.env.PRIVATE_CHAT_ID; // Личный чат, куда шлём уведомления
+const PUBLIC_CHAT_ID = process.env.PUBLIC_CHAT_ID;
+const PRIVATE_CHAT_ID = process.env.PRIVATE_CHAT_ID;
+const BINANCE_CHAT_ID = process.env.BINANCE_CHAT_ID;
 
 const activeWatchers = new Map();
 const seenSignatures = new Set();
@@ -19,12 +19,20 @@ bot.on('message', (msg) => {
   const senderId = msg.chat.id;
   if (!text || senderId !== Number(PUBLIC_CHAT_ID)) return;
 
-  // 🧠 Проверяем текст и сумму
   let label = null;
+  let timeoutMs = 0;
+  let targetChatId = PRIVATE_CHAT_ID;
+
   if (text.includes('Кукоин Биржа') && text.includes('99.99 SOL')) {
     label = 'Кукоин 1';
+    timeoutMs = 20 * 60 * 60 * 1000;
   } else if (text.includes('Кукоин 50') && text.includes('68.99 SOL')) {
     label = 'Кук 3';
+    timeoutMs = 20 * 60 * 60 * 1000;
+  } else if (text.includes('Бинанс 99') && text.includes('99.99')) {
+    label = 'Бинанс 99';
+    timeoutMs = 6 * 60 * 60 * 1000;
+    targetChatId = BINANCE_CHAT_ID;
   }
 
   if (!label) return;
@@ -33,34 +41,36 @@ bot.on('message', (msg) => {
   const wallet = linkMatch?.[1];
   if (!wallet || activeWatchers.has(wallet)) return;
 
-  bot.sendMessage(PRIVATE_CHAT_ID,
-    `⚠️ [${label}] Обнаружен перевод ${label === 'Кук 3' ? '68.99' : '99.99'} SOL\n` +
-    `💰 Адрес: <code>${wallet}</code>\n` +
-    `⏳ Ожидаем mint...`, { parse_mode: 'HTML' });
+  if (label !== 'Бинанс 99') {
+    bot.sendMessage(PRIVATE_CHAT_ID,
+      `⚠️ [${label}] Обнаружен перевод ${label === 'Кук 3' ? '68.99' : '99.99'} SOL\n` +
+      `💰 Адрес: <code>${wallet}</code>\n` +
+      `⏳ Ожидаем mint...`, { parse_mode: 'HTML' });
+  }
 
-  watchMint(wallet, label);
+  watchMint(wallet, label, timeoutMs, targetChatId);
 });
 
-function watchMint(wallet, label) {
+function watchMint(wallet, label, timeoutMs, targetChatId) {
   const ws = new WebSocket(`wss://rpc.helius.xyz/?api-key=${HELIUS_KEY}`);
   activeWatchers.set(wallet, ws);
 
   const timeout = setTimeout(() => {
     if (activeWatchers.has(wallet)) {
-      bot.sendMessage(PRIVATE_CHAT_ID,
-        `⌛ [${label}] Mint не обнаружен в течение 20 часов.\n` +
+      bot.sendMessage(targetChatId,
+        `⌛ [${label}] Mint не обнаружен в течение ${timeoutMs / 3600000} ч.\n` +
         `🕳 Отслеживание ${wallet} завершено.`, { parse_mode: 'HTML' });
       ws.close();
       activeWatchers.delete(wallet);
     }
-  }, 20 * 60 * 60 * 1000); // 20 часов
+  }, timeoutMs);
 
   const pingInterval = setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) {
       ws.ping();
       console.log('📡 Sent ping');
     }
-  }, 50 * 1000);
+  }, 50000);
 
   ws.on('open', () => {
     console.log(`✅ [${label}] Listening for mint on ${wallet}`);
@@ -94,7 +104,7 @@ function watchMint(wallet, label) {
       clearTimeout(timeout);
       clearInterval(pingInterval);
 
-      bot.sendMessage(PRIVATE_CHAT_ID,
+      bot.sendMessage(targetChatId,
         `🚀 [${label}] Mint обнаружен!\n` +
         `🪙 Контракт токена: <code>${mintAddress}</code>`, { parse_mode: 'HTML' });
 
