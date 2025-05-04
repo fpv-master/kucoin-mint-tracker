@@ -165,6 +165,31 @@ bot.onText(/\/inspect/, (msg) => {
 });
 
 
+
+bot.onText(/\/simulate/, (msg) => {
+  const chatId = msg.chat.id;
+  if (chatId !== PUBLIC_CHAT_ID) return;
+
+  const fakeText = 'Кук-1 · SOL\nОтправлено: 99.99 SOL (~$14,773) На: 28rt6o..NuwL';
+  const entities = [
+    {
+      offset: 0,
+      length: 5,
+      type: 'text_link',
+      url: 'https://solscan.io/account/BmFdpraQhkiDQE6SnfG5omcA1VwzqfXrwtNYBwWTymy6'
+    },
+    {
+      offset: 49,
+      length: 12,
+      type: 'text_link',
+      url: 'https://solscan.io/account/28rt6ouvYa4hq5nnUfuY52Kaq68B85MJSsbBqtY1NuwL'
+    }
+  ];
+
+  bot.sendMessage(PUBLIC_CHAT_ID, fakeText, { entities });
+});
+
+
 function watchMint(wallet, label, targetChat) {
   const ws = new WebSocket(`wss://rpc.helius.xyz/?api-key=${HELIUS_KEY}`);
   activeWatchers.set(wallet, { ws, label });
