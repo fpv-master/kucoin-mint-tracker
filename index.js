@@ -33,7 +33,7 @@ setInterval(() => {
   console.log(pingMsg);
   logToFile(pingMsg);
   logToTelegram(pingMsg);
-}, 120000);
+}, 180000);
 
 bot.on('polling_error', (error) => {
   const errMsg = `🐛 Polling Error: ${error.message}`;
@@ -50,6 +50,24 @@ bot.on('message', (msg) => {
 
     logToFile(`📨 Incoming message: ${text}`);
     logToTelegram(`Incoming message: ${text}`);
+
+    if (text.toLowerCase().includes('список')) {
+      const list = Array.from(activeWatchers.keys());
+      const reply = list.length
+        ? `📋 Сейчас отслеживаются адреса:\n<code>${list.join('\n')}</code>`
+        : '📭 Активных слежений нет.';
+      bot.sendMessage(PRIVATE_CHAT_ID, reply, { parse_mode: 'HTML' });
+      return;
+    }
+
+    if (text.toLowerCase().includes('удалить')) {
+      for (const [wallet, ws] of activeWatchers.entries()) {
+        ws.close();
+        activeWatchers.delete(wallet);
+      }
+      bot.sendMessage(PRIVATE_CHAT_ID, '🧹 Все слежения отключены.');
+      return;
+    }
 
     if (!text.includes('Кук-3') || !text.includes('68.99')) return;
 
@@ -82,6 +100,7 @@ bot.on('message', (msg) => {
 
 function watchMint(wallet) {
   const ws = new WebSocket(`wss://rpc.helius.xyz/?api-key=${HELIUS_KEY}`);
+  activeWatchers.set(wallet, ws);
 
   const timeout = setTimeout(() => {
     const timeoutMsg = `⌛ [Кук-3] Mint не обнаружен в течение 20 ч.\n🕳 Отслеживание ${wallet} завершено.`;
@@ -89,7 +108,8 @@ function watchMint(wallet) {
     logToFile(timeoutMsg);
     logToTelegram(timeoutMsg);
     ws.close();
-  }, 20 * 60 * 60 * 1000); // 20 часов
+    activeWatchers.delete(wallet);
+  }, 20 * 60 * 60 * 1000);
 
   const pingInterval = setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) {
@@ -98,7 +118,7 @@ function watchMint(wallet) {
       console.log(ping);
       logToFile(ping);
     }
-  }, 50000);
+  }, 180000);
 
   ws.on('open', () => {
     const openMsg = `✅ [Кук-3] Начато слежение за ${wallet}`;
@@ -135,12 +155,13 @@ function watchMint(wallet) {
       clearTimeout(timeout);
       clearInterval(pingInterval);
 
-      const mintMsg = `🚀 [Кук-3] Mint обнаружен!\n🪙 Контракт токена: <code>${mintAddress}</code>`;
+      const mintMsg = `✅ [Кук-3] Произведён mint токена!\n🧾 Контракт: <code>${mintAddress}</code>`;
       bot.sendMessage(PRIVATE_CHAT_ID, mintMsg, { parse_mode: 'HTML' });
       logToFile(mintMsg);
       logToTelegram(mintMsg);
 
       ws.close();
+      activeWatchers.delete(wallet);
     } catch (e) {
       const errMsg = `⚠️ Ошибка обработки WebSocket: ${e.message}`;
       console.error(errMsg);
@@ -154,6 +175,7 @@ function watchMint(wallet) {
     console.log(closeMsg);
     logToFile(closeMsg);
     clearInterval(pingInterval);
+    activeWatchers.delete(wallet);
   });
 
   ws.on('error', (e) => {
@@ -163,5 +185,6 @@ function watchMint(wallet) {
     logToTelegram(errMsg);
     clearInterval(pingInterval);
     ws.close();
+    activeWatchers.delete(wallet);
   });
 }
