@@ -18,6 +18,7 @@ const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
 const HELIUS_KEY = process.env.HELIUS_API_KEY;
 const PUBLIC_CHAT_ID = Number(process.env.PUBLIC_CHAT_ID);
 const PRIVATE_CHAT_ID = Number(process.env.PRIVATE_CHAT_ID);
+const BINANCE_CHAT_ID = Number(process.env.BINANCE_CHAT_ID);
 
 function logToTelegram(message) {
   bot.sendMessage(PRIVATE_CHAT_ID, `🪵 Лог:\n<code>${message}</code>`, { parse_mode: 'HTML' });
@@ -126,6 +127,8 @@ bot.on('message', (msg) => {
       label = 'Кук-3';
     } else if (text.includes('Кук-1') && text.includes('99.99')) {
       label = 'Кук-1';
+    } else if (text.includes('Бинанс') && (text.includes('99.99') || text.includes('99.999'))) {
+      label = 'Бинанс';
     } else return;
 
     let wallet = null;
@@ -137,7 +140,8 @@ bot.on('message', (msg) => {
     if (!wallet) return;
 
     const logMsg = `⚠️ [${label}] Обнаружен перевод ${label === 'Кук-3' ? '68.99' : '99.99'} SOL\n💰 Адрес: ${wallet}`;
-    bot.sendMessage(PRIVATE_CHAT_ID, logMsg, { parse_mode: 'HTML' });
+    const targetChat = label === 'Бинанс' ? BINANCE_CHAT_ID : PRIVATE_CHAT_ID;
+  bot.sendMessage(targetChat, logMsg, { parse_mode: 'HTML' });
     logToTelegram(logMsg);
     logToFile(logMsg);
 
@@ -156,7 +160,7 @@ function watchMint(wallet, label) {
 
   const timeout = setTimeout(() => {
     const msg = `⌛ [${label}] Mint не обнаружен. Завершено слежение за ${wallet}`;
-    bot.sendMessage(PRIVATE_CHAT_ID, msg, { parse_mode: 'HTML' });
+    bot.sendMessage(label === 'Бинанс' ? BINANCE_CHAT_ID : PRIVATE_CHAT_ID, msg, { parse_mode: 'HTML' });
     logToFile(msg);
     logToTelegram(msg);
     ws.close();
@@ -199,7 +203,7 @@ function watchMint(wallet, label) {
       clearInterval(pingInterval);
 
       const mintMsg = `✅ [${label}] Mint выполнен!\n🧾 Контракт: <code>${mintAddress}</code>`;
-      bot.sendMessage(PRIVATE_CHAT_ID, mintMsg, { parse_mode: 'HTML' });
+      bot.sendMessage(label === 'Бинанс' ? BINANCE_CHAT_ID : PRIVATE_CHAT_ID, mintMsg, { parse_mode: 'HTML' });
       logToFile(mintMsg);
       logToTelegram(mintMsg);
 
