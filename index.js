@@ -2,172 +2,97 @@
 const dotenv = require('dotenv');
 dotenv.config();
 
-const fs = require('fs');
-const path = require('path');
 const TelegramBot = require('node-telegram-bot-api');
 const WebSocket = require('ws');
 
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
 const HELIUS_KEY = process.env.HELIUS_API_KEY;
-const PUBLIC_CHAT_ID = Number(process.env.PUBLIC_CHAT_ID);
-const PRIVATE_CHAT_ID = Number(process.env.PRIVATE_CHAT_ID);
-const BINANCE_CHAT_ID = Number(process.env.BINANCE_CHAT_ID);
 
-const seenSignatures = new Set();
+const PUBLIC_CHAT_ID = process.env.PUBLIC_CHAT_ID;
+const PRIVATE_CHAT_ID = process.env.PRIVATE_CHAT_ID;
+const BINANCE_CHAT_ID = process.env.BINANCE_CHAT_ID;
+
 const activeWatchers = new Map();
-
-setInterval(() => {
-  console.log('📡 Global ping');
-}, 180000);
+const seenSignatures = new Set();
 
 bot.on('message', (msg) => {
-  try {
-    const text = msg.text;
-    const senderId = msg.chat.id;
-    if (!text || senderId !== PUBLIC_CHAT_ID) return;
+  const text = msg.text;
+  const senderId = msg.chat.id;
+  if (!text || senderId !== Number(PUBLIC_CHAT_ID)) return;
 
-    let label = null;
-    if (text.includes('Кук-3') && text.includes('68.99')) {
-      label = 'Кук-3';
-    } else if (text.includes('Кук-1') && text.includes('99.99')) {
-      label = 'Кук-1';
-    } else if (text.includes('Бинанс') && (text.includes('99.99') || text.includes('99.999'))) {
-      label = 'Бинанс';
-    } else return;
+  let label = null;
+  let timeoutMs = 0;
+  let targetChatId = PRIVATE_CHAT_ID;
 
-    let wallet = null;
-    const links = msg.entities?.filter(e => e.type === 'text_link' && e.url?.includes('solscan.io/account/'));
-    const last = links?.[links.length - 1];
-    const match = last?.url?.match(/account\/(\w{32,44})/);
-    wallet = match?.[1];
-
-    if (!wallet) return;
-
-    const targetChat = label === 'Бинанс' ? BINANCE_CHAT_ID : PRIVATE_CHAT_ID;
-    const alertMsg = `⚠️ [${label}] Обнаружен перевод ${label === 'Кук-3' ? '68.99' : '99.99'} SOL\n💰 Адрес: <code>${wallet}</code>\n⏳ Ожидаем mint...`;
-    bot.sendMessage(targetChat, alertMsg, { parse_mode: 'HTML' });
-
-    watchMint(wallet, label, targetChat);
-  } catch (err) {
-    console.error('Ошибка обработки сообщения:', err.message);
+  if (text.includes('Кукоин Биржа') && text.includes('99.99 SOL')) {
+    label = 'Кукоин 1';
+    timeoutMs = 20 * 60 * 60 * 1000;
+  } else if (text.includes('Кукоин 50') && text.includes('68.99 SOL')) {
+    label = 'Кук 3';
+    timeoutMs = 20 * 60 * 60 * 1000;
+  } else if (text.includes('Бинанс 99') && (text.includes('99.99') || text.includes('99.999'))) {
+    label = 'Бинанс 99';
+    timeoutMs = 6 * 60 * 60 * 1000;
+    targetChatId = BINANCE_CHAT_ID;
   }
-});
 
+  if (!label) return;
 
-bot.onText(/\/list/, (msg) => {
-  const chatId = msg.chat.id;
-  if (chatId === PUBLIC_CHAT_ID) return;
-
-  const list = Array.from(activeWatchers.entries());
-  if (!list.length) {
-    bot.sendMessage(chatId, '📭 Нет активных слежений.');
-  } else {
-    const formatted = list.map(([wallet, meta]) => `${meta.label}: ${wallet}`).join('\n');
-    bot.sendMessage(chatId, `📋 Активные адреса:\n<code>${formatted}</code>`, { parse_mode: 'HTML' });
-  }
-});
-
-bot.onText(/\/delete (.+)/, (msg, match) => {
-  const chatId = msg.chat.id;
-  if (chatId === PUBLIC_CHAT_ID) return;
-
-  const wallet = match[1].trim();
-  const meta = activeWatchers.get(wallet);
-  if (meta) {
-    meta.ws.close();
-    activeWatchers.delete(wallet);
-    bot.sendMessage(chatId, `❌ Слежение остановлено: <code>${meta.label}: ${wallet}</code>`, { parse_mode: 'HTML' });
-  } else {
-    bot.sendMessage(chatId, `⚠️ Адрес <code>${wallet}</code> не отслеживается.`, { parse_mode: 'HTML' });
-  }
-});
-
-bot.onText(/\/delete$/, (msg) => {
-  const chatId = msg.chat.id;
-  if (chatId === PUBLIC_CHAT_ID) return;
-
-  for (const [wallet, meta] of activeWatchers.entries()) {
-    meta.ws.close();
-    activeWatchers.delete(wallet);
-  }
-  bot.sendMessage(chatId, '🧹 Все слежения остановлены.');
-});
-
-
-
-bot.onText(/\/start/, (msg) => {
-  const chatId = msg.chat.id;
-  if (chatId === PUBLIC_CHAT_ID) return;
-
-  bot.sendMessage(chatId, '👋 Панель управления', {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: '📋 Список адресов', callback_data: 'list' }],
-        [{ text: '🧹 Удалить все', callback_data: 'delete_all' }]
-      ]
-    }
-  });
-});
-
-bot.on('callback_query', (query) => {
-  const chatId = query.message.chat.id;
-  const data = query.data;
-
-  if (data === 'list') {
-    const list = Array.from(activeWatchers.entries());
-    if (!list.length) {
-      bot.sendMessage(chatId, '📭 Нет активных адресов.');
-    } else {
-      const buttons = list.map(([addr, meta]) => ([{ text: `❌ ${meta.label}: ${addr}`, callback_data: `delete_${addr}` }]));
-      bot.sendMessage(chatId, '📋 Активные адреса:', {
-        reply_markup: {
-          inline_keyboard: [...buttons, [{ text: '🧹 Удалить все', callback_data: 'delete_all' }]]
-        }
-      });
-    }
-  } else if (data === 'delete_all') {
-    for (const [wallet, meta] of activeWatchers.entries()) {
-      meta.ws.close();
-      activeWatchers.delete(wallet);
-    }
-    bot.sendMessage(chatId, '🧹 Все слежения остановлены.');
-  } else if (data.startsWith('delete_')) {
-    const wallet = data.replace('delete_', '');
-    const meta = activeWatchers.get(wallet);
-    if (meta) {
-      meta.ws.close();
-      activeWatchers.delete(wallet);
-      bot.sendMessage(chatId, `❌ Слежение остановлено: <code>${meta.label}: ${wallet}</code>`, { parse_mode: 'HTML' });
+  // 1. Сначала ищем обычную solscan-ссылку
+  let wallet = null;
+  const linkMatch = text.match(/solscan\.io\/account\/(\w{32,44})/);
+  if (linkMatch) {
+    wallet = linkMatch[1];
+  } else if (msg.entities) {
+    // 2. Ищем text_link entity с solscan.io/account
+    const entity = msg.entities.find(e => e.type === 'text_link' && e.url?.includes('solscan.io/account/'));
+    if (entity && entity.url) {
+      const match = entity.url.match(/account\/(\w{32,44})/);
+      wallet = match?.[1];
     }
   }
+
+  if (!wallet || activeWatchers.has(wallet)) return;
+
+  if (label !== 'Бинанс 99') {
+    bot.sendMessage(PRIVATE_CHAT_ID,
+      `⚠️ [${label}] Обнаружен перевод ${label === 'Кук 3' ? '68.99' : '99.99'} SOL\n` +
+      `💰 Адрес: <code>${wallet}</code>\n⏳ Ожидаем mint...`, { parse_mode: 'HTML' });
+  }
+
+  watchMint(wallet, label, timeoutMs, targetChatId);
 });
 
-
-function watchMint(wallet, label, targetChat) {
+function watchMint(wallet, label, timeoutMs, targetChatId) {
   const ws = new WebSocket(`wss://rpc.helius.xyz/?api-key=${HELIUS_KEY}`);
-  activeWatchers.set(wallet, { ws, label });
+  activeWatchers.set(wallet, ws);
 
   const timeout = setTimeout(() => {
-    const msg = `⌛ [${label}] Mint не обнаружен. Завершено слежение за <code>${wallet}</code>`;
-    bot.sendMessage(targetChat, msg, { parse_mode: 'HTML' });
-    ws.close();
-    activeWatchers.delete(wallet);
-  }, 20 * 60 * 60 * 1000);
+    if (activeWatchers.has(wallet)) {
+      bot.sendMessage(targetChatId,
+        `⌛ [${label}] Mint не обнаружен в течение ${timeoutMs / 3600000} ч.\n🕳 Отслеживание ${wallet} завершено.`, { parse_mode: 'HTML' });
+      ws.close();
+      activeWatchers.delete(wallet);
+    }
+  }, timeoutMs);
 
   const pingInterval = setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) {
       ws.ping();
-      console.log(`📡 [${label}] Ping ${wallet}`);
+      console.log('📡 Sent ping');
     }
-  }, 180000);
+  }, 50000);
 
   ws.on('open', () => {
-    console.log(`✅ [${label}] Слежение начато за ${wallet}`);
+    console.log(`✅ [${label}] Listening for mint on ${wallet}`);
     ws.send(JSON.stringify({
       jsonrpc: '2.0',
       id: 1,
       method: 'logsSubscribe',
-      params: [{ mentions: [wallet] }, { commitment: 'confirmed', encoding: 'jsonParsed' }]
+      params: [
+        { mentions: [wallet] },
+        { commitment: 'confirmed', encoding: 'jsonParsed' }
+      ]
     }));
   });
 
@@ -177,35 +102,34 @@ function watchMint(wallet, label, targetChat) {
       const logs = msg?.params?.result?.value?.logs || [];
       const sig = msg?.params?.result?.value?.signature;
       const mentions = msg?.params?.result?.value?.mentions || [];
-
       if (!sig || seenSignatures.has(sig)) return;
-      if (!logs.some(log => log.includes('InitializeMint'))) return;
 
-      const mintAddress = mentions[0] || 'неизвестен';
+      const found = logs.find((log) =>
+        log.includes('InitializeMint') || log.includes('InitializeMint2')
+      );
+      if (!found) return;
+
+      const mintAddress = mentions?.[0] || 'неизвестен';
       seenSignatures.add(sig);
+
       clearTimeout(timeout);
       clearInterval(pingInterval);
 
-      const mintMsg = `✅ [${label}] Mint выполнен!\n🧾 Контракт: <code>${mintAddress}</code>`;
-      bot.sendMessage(targetChat, mintMsg, { parse_mode: 'HTML' });
+      bot.sendMessage(targetChatId,
+        `🚀 [${label}] Mint обнаружен!\n🪙 Контракт токена: <code>${mintAddress}</code>`, { parse_mode: 'HTML' });
 
       ws.close();
       activeWatchers.delete(wallet);
     } catch (e) {
-      console.error(`⚠️ Ошибка обработки mint-сообщения: ${e.message}`);
+      console.log('⚠️ Ошибка обработки сообщения:', e.message);
     }
   });
 
-  ws.on('error', (e) => {
-    console.error(`💥 WebSocket ошибка: ${e.message}`);
+  ws.on('close', () => {
+    console.log(`❌ [${label}] WebSocket closed for ${wallet}`);
     clearInterval(pingInterval);
-    ws.close();
     activeWatchers.delete(wallet);
   });
 
-  ws.on('close', () => {
-    console.log(`❌ [${label}] WebSocket закрыт: ${wallet}`);
-    clearInterval(pingInterval);
-    activeWatchers.delete(wallet);
-  });
+  ws.on('error', (e) => console.log(`💥 WebSocket error: ${e.message}`));
 }
