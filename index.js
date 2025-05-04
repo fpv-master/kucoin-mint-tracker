@@ -26,7 +26,7 @@ function logToTelegram(message) {
 }
 
 const seenSignatures = new Set();
-const activeWatchers = new Map();
+const activeWatchers = new Map(); // key: wallet, value: { ws, label }
 
 setInterval(() => {
   const pingMsg = '📡 Global ping';
@@ -34,11 +34,10 @@ setInterval(() => {
   logToFile(pingMsg);
 }, 180000);
 
-// Обработка команд в личке
+// Команды управления
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
   if (chatId === PUBLIC_CHAT_ID) return;
-
   bot.sendMessage(chatId, '👋 Управление слежением', {
     reply_markup: {
       inline_keyboard: [
@@ -52,22 +51,21 @@ bot.onText(/\/start/, (msg) => {
 bot.onText(/\/list/, (msg) => {
   const chatId = msg.chat.id;
   if (chatId === PUBLIC_CHAT_ID) return;
-
-  const list = Array.from(activeWatchers.keys());
+  const list = Array.from(activeWatchers.entries());
   if (list.length === 0) {
     bot.sendMessage(chatId, '📭 Активных слежений нет.');
   } else {
+    const formatted = list.map(([addr, meta]) => `${meta.label}: ${addr}`).join('\n');
     bot.sendMessage(chatId, `📋 Отслеживаемые адреса:
-<code>${list.join('\n')}</code>`, { parse_mode: 'HTML' });
+<code>${formatted}</code>`, { parse_mode: 'HTML' });
   }
 });
 
 bot.onText(/\/delete/, (msg) => {
   const chatId = msg.chat.id;
   if (chatId === PUBLIC_CHAT_ID) return;
-
-  for (const [wallet, ws] of activeWatchers.entries()) {
-    ws.close();
+  for (const [wallet, meta] of activeWatchers.entries()) {
+    meta.ws.close();
     activeWatchers.delete(wallet);
   }
   bot.sendMessage(chatId, '🧹 Все слежения остановлены.');
@@ -76,13 +74,12 @@ bot.onText(/\/delete/, (msg) => {
 bot.on('callback_query', (query) => {
   const chatId = query.message.chat.id;
   const data = query.data;
-
   if (data === 'list') {
-    const list = Array.from(activeWatchers.keys());
+    const list = Array.from(activeWatchers.entries());
     if (list.length === 0) {
       bot.sendMessage(chatId, '📭 Активных слежений нет.');
     } else {
-      const buttons = list.map(addr => ([{ text: `❌ ${addr}`, callback_data: `delete_${addr}` }]));
+      const buttons = list.map(([addr, meta]) => ([{ text: `❌ ${meta.label}: ${addr}`, callback_data: `delete_${addr}` }]));
       bot.sendMessage(chatId, '📋 Активные адреса:', {
         reply_markup: {
           inline_keyboard: [...buttons, [{ text: '🧹 Удалить все', callback_data: 'delete_all' }]]
@@ -90,18 +87,18 @@ bot.on('callback_query', (query) => {
       });
     }
   } else if (data === 'delete_all') {
-    for (const [wallet, ws] of activeWatchers.entries()) {
-      ws.close();
+    for (const [wallet, meta] of activeWatchers.entries()) {
+      meta.ws.close();
       activeWatchers.delete(wallet);
     }
     bot.sendMessage(chatId, '🧹 Все слежения остановлены.');
   } else if (data.startsWith('delete_')) {
     const wallet = data.replace('delete_', '');
-    const ws = activeWatchers.get(wallet);
-    if (ws) {
-      ws.close();
+    const meta = activeWatchers.get(wallet);
+    if (meta) {
+      meta.ws.close();
       activeWatchers.delete(wallet);
-      bot.sendMessage(chatId, `❌ Слежение за <code>${wallet}</code> остановлено.`, { parse_mode: 'HTML' });
+      bot.sendMessage(chatId, `❌ Слежение за <code>${meta.label}: ${wallet}</code> остановлено.`, { parse_mode: 'HTML' });
     } else {
       bot.sendMessage(chatId, `⚠️ Адрес <code>${wallet}</code> не отслеживается.`, { parse_mode: 'HTML' });
     }
@@ -124,7 +121,12 @@ bot.on('message', (msg) => {
     logToFile(`📨 Incoming message: ${text}`);
     logToTelegram(`Incoming message: ${text}`);
 
-    if (!text.includes('Кук-3') || !text.includes('68.99')) return;
+    let label = null;
+    if (text.includes('Кук-3') && text.includes('68.99')) {
+      label = 'Кук-3';
+    } else if (text.includes('Кук-1') && text.includes('99.99')) {
+      label = 'Кук-1';
+    } else return;
 
     let wallet = null;
     const linkMatch = text.match(/solscan\.io\/account\/(\w{32,44})/);
@@ -138,12 +140,12 @@ bot.on('message', (msg) => {
 
     if (!wallet) return;
 
-    const notifyMsg = `⚠️ [Кук-3] Обнаружен перевод 68.99 SOL\n💰 Адрес: <code>${wallet}</code>\n⏳ Ожидаем mint...`;
+    const notifyMsg = `⚠️ [${label}] Обнаружен перевод ${label === 'Кук-3' ? '68.99' : '99.99'} SOL\n💰 Адрес: <code>${wallet}</code>\n⏳ Ожидаем mint...`;
     bot.sendMessage(PRIVATE_CHAT_ID, notifyMsg, { parse_mode: 'HTML' });
     logToFile(notifyMsg);
     logToTelegram(notifyMsg);
 
-    watchMint(wallet);
+    watchMint(wallet, label);
 
   } catch (err) {
     const errorMsg = `🧨 Error in message handler: ${err.message}`;
@@ -153,12 +155,12 @@ bot.on('message', (msg) => {
   }
 });
 
-function watchMint(wallet) {
+function watchMint(wallet, label) {
   const ws = new WebSocket(`wss://rpc.helius.xyz/?api-key=${HELIUS_KEY}`);
-  activeWatchers.set(wallet, ws);
+  activeWatchers.set(wallet, { ws, label });
 
   const timeout = setTimeout(() => {
-    const timeoutMsg = `⌛ [Кук-3] Mint не обнаружен в течение 20 ч.\n🕳 Отслеживание ${wallet} завершено.`;
+    const timeoutMsg = `⌛ [${label}] Mint не обнаружен за 20 ч.\n🕳 ${wallet}`;
     bot.sendMessage(PRIVATE_CHAT_ID, timeoutMsg, { parse_mode: 'HTML' });
     logToFile(timeoutMsg);
     logToTelegram(timeoutMsg);
@@ -169,14 +171,14 @@ function watchMint(wallet) {
   const pingInterval = setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) {
       ws.ping();
-      const ping = `📡 [Кук-3] Ping для ${wallet}`;
+      const ping = `📡 [${label}] Ping для ${wallet}`;
       console.log(ping);
       logToFile(ping);
     }
   }, 180000);
 
   ws.on('open', () => {
-    const openMsg = `✅ [Кук-3] Начато слежение за ${wallet}`;
+    const openMsg = `✅ [${label}] Слежение за ${wallet}`;
     console.log(openMsg);
     logToFile(openMsg);
     logToTelegram(openMsg);
@@ -199,9 +201,7 @@ function watchMint(wallet) {
       const mentions = msg?.params?.result?.value?.mentions || [];
 
       if (!sig || seenSignatures.has(sig)) return;
-      const found = logs.find((log) =>
-        log.includes('InitializeMint') || log.includes('InitializeMint2')
-      );
+      const found = logs.find(log => log.includes('InitializeMint') || log.includes('InitializeMint2'));
       if (!found) return;
 
       const mintAddress = mentions?.[0] || 'неизвестен';
@@ -210,7 +210,7 @@ function watchMint(wallet) {
       clearTimeout(timeout);
       clearInterval(pingInterval);
 
-      const mintMsg = `✅ [Кук-3] Произведён mint токена!\n🧾 Контракт: <code>${mintAddress}</code>`;
+      const mintMsg = `✅ [${label}] Mint обнаружен!\n🧾 Контракт: <code>${mintAddress}</code>`;
       bot.sendMessage(PRIVATE_CHAT_ID, mintMsg, { parse_mode: 'HTML' });
       logToFile(mintMsg);
       logToTelegram(mintMsg);
@@ -226,7 +226,7 @@ function watchMint(wallet) {
   });
 
   ws.on('close', () => {
-    const closeMsg = `❌ [Кук-3] WebSocket закрыт для ${wallet}`;
+    const closeMsg = `❌ [${label}] WebSocket закрыт для ${wallet}`;
     console.log(closeMsg);
     logToFile(closeMsg);
     clearInterval(pingInterval);
