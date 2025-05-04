@@ -32,8 +32,57 @@ setInterval(() => {
   const pingMsg = '📡 Global ping';
   console.log(pingMsg);
   logToFile(pingMsg);
-  logToTelegram(pingMsg);
 }, 180000);
+
+// Команды управления в личке
+bot.onText(/\/start/, (msg) => {
+  const chatId = msg.chat.id;
+  if (chatId === PUBLIC_CHAT_ID) return;
+
+  bot.sendMessage(chatId, '👋 Управление слежением', {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '📋 Список адресов', callback_data: 'list' }],
+        [{ text: '🧹 Удалить все', callback_data: 'delete_all' }]
+      ]
+    }
+  });
+});
+
+bot.on('callback_query', (query) => {
+  const chatId = query.message.chat.id;
+  const data = query.data;
+
+  if (data === 'list') {
+    const list = Array.from(activeWatchers.keys());
+    if (list.length === 0) {
+      bot.sendMessage(chatId, '📭 Активных слежений нет.');
+    } else {
+      const buttons = list.map(addr => ([{ text: `❌ ${addr}`, callback_data: `delete_${addr}` }]));
+      bot.sendMessage(chatId, '📋 Активные адреса:', {
+        reply_markup: {
+          inline_keyboard: [...buttons, [{ text: '🧹 Удалить все', callback_data: 'delete_all' }]]
+        }
+      });
+    }
+  } else if (data === 'delete_all') {
+    for (const [wallet, ws] of activeWatchers.entries()) {
+      ws.close();
+      activeWatchers.delete(wallet);
+    }
+    bot.sendMessage(chatId, '🧹 Все слежения остановлены.');
+  } else if (data.startsWith('delete_')) {
+    const wallet = data.replace('delete_', '');
+    const ws = activeWatchers.get(wallet);
+    if (ws) {
+      ws.close();
+      activeWatchers.delete(wallet);
+      bot.sendMessage(chatId, `❌ Слежение за <code>${wallet}</code> остановлено.`, { parse_mode: 'HTML' });
+    } else {
+      bot.sendMessage(chatId, `⚠️ Адрес <code>${wallet}</code> не отслеживается.`, { parse_mode: 'HTML' });
+    }
+  }
+});
 
 bot.on('polling_error', (error) => {
   const errMsg = `🐛 Polling Error: ${error.message}`;
@@ -50,24 +99,6 @@ bot.on('message', (msg) => {
 
     logToFile(`📨 Incoming message: ${text}`);
     logToTelegram(`Incoming message: ${text}`);
-
-    if (text.toLowerCase().includes('список')) {
-      const list = Array.from(activeWatchers.keys());
-      const reply = list.length
-        ? `📋 Сейчас отслеживаются адреса:\n<code>${list.join('\n')}</code>`
-        : '📭 Активных слежений нет.';
-      bot.sendMessage(PRIVATE_CHAT_ID, reply, { parse_mode: 'HTML' });
-      return;
-    }
-
-    if (text.toLowerCase().includes('удалить')) {
-      for (const [wallet, ws] of activeWatchers.entries()) {
-        ws.close();
-        activeWatchers.delete(wallet);
-      }
-      bot.sendMessage(PRIVATE_CHAT_ID, '🧹 Все слежения отключены.');
-      return;
-    }
 
     if (!text.includes('Кук-3') || !text.includes('68.99')) return;
 
