@@ -23,8 +23,7 @@ setInterval(() => {
 bot.on('message', (msg) => {
   try {
     const text = msg.text;
-    const senderId = msg.chat.id;
-    if (!text || senderId !== PUBLIC_CHAT_ID) return;
+    if (!text || msg.chat.id !== PUBLIC_CHAT_ID) return;
 
     let label = null;
     if (text.includes('Кук-3') && text.includes('68.99')) {
