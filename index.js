@@ -34,7 +34,7 @@ setInterval(() => {
   logToFile(pingMsg);
 }, 180000);
 
-// Команды управления в личке
+// Обработка команд в личке
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
   if (chatId === PUBLIC_CHAT_ID) return;
@@ -47,6 +47,30 @@ bot.onText(/\/start/, (msg) => {
       ]
     }
   });
+});
+
+bot.onText(/\/list/, (msg) => {
+  const chatId = msg.chat.id;
+  if (chatId === PUBLIC_CHAT_ID) return;
+
+  const list = Array.from(activeWatchers.keys());
+  if (list.length === 0) {
+    bot.sendMessage(chatId, '📭 Активных слежений нет.');
+  } else {
+    bot.sendMessage(chatId, `📋 Отслеживаемые адреса:
+<code>${list.join('\n')}</code>`, { parse_mode: 'HTML' });
+  }
+});
+
+bot.onText(/\/delete/, (msg) => {
+  const chatId = msg.chat.id;
+  if (chatId === PUBLIC_CHAT_ID) return;
+
+  for (const [wallet, ws] of activeWatchers.entries()) {
+    ws.close();
+    activeWatchers.delete(wallet);
+  }
+  bot.sendMessage(chatId, '🧹 Все слежения остановлены.');
 });
 
 bot.on('callback_query', (query) => {
