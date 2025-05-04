@@ -2,18 +2,8 @@
 const dotenv = require('dotenv');
 dotenv.config();
 
-const fs = require('fs');
-const path = require('path');
 const TelegramBot = require('node-telegram-bot-api');
 const WebSocket = require('ws');
-
-const logFile = path.join(__dirname, 'logs.txt');
-function logToFile(message) {
-  const timestamp = new Date().toISOString();
-  fs.appendFile(logFile, `[${timestamp}] ${message}\n`, err => {
-    if (err) console.error('🚫 Не удалось записать в лог-файл:', err.message);
-  });
-}
 
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
 const HELIUS_KEY = process.env.HELIUS_API_KEY;
@@ -25,16 +15,12 @@ const BINANCE_CHAT_ID = Number(process.env.BINANCE_CHAT_ID);
 const activeWatchers = new Map();
 const seenSignatures = new Set();
 
-setInterval(() => {
-  const pingMsg = '📡 Global ping';
-  console.log(pingMsg);
-  logToFile(pingMsg);
-}, 120000);
+// 🔁 Global ping every 2 min to prevent Render sleep
+setInterval(() => console.log('📡 Global ping'), 120000);
 
+// 🧯 Catch polling errors
 bot.on('polling_error', (error) => {
-  const errMsg = `🐛 Polling Error: ${error.message}`;
-  console.error(errMsg);
-  logToFile(errMsg);
+  console.error('🐛 Polling Error:', error.message);
 });
 
 bot.on('message', (msg) => {
@@ -43,7 +29,7 @@ bot.on('message', (msg) => {
     const senderId = msg.chat.id;
 
     if (!text || senderId !== PUBLIC_CHAT_ID) return;
-    logToFile(`📨 Incoming message: ${text}`);
+    console.log('📨 Incoming message:', text);
 
     let label = null;
     let timeoutMs = 0;
@@ -76,17 +62,15 @@ bot.on('message', (msg) => {
     if (!wallet || activeWatchers.has(wallet)) return;
 
     if (label !== 'Бинанс 99') {
-      const notifyMsg = `⚠️ [${label}] Обнаружен перевод ${label === 'Кук 3' ? '68.99' : '99.99'} SOL\n💰 Адрес: <code>${wallet}</code>\n⏳ Ожидаем mint...`;
-      bot.sendMessage(PRIVATE_CHAT_ID, notifyMsg, { parse_mode: 'HTML' });
-      logToFile(notifyMsg);
+      bot.sendMessage(PRIVATE_CHAT_ID,
+        `⚠️ [${label}] Обнаружен перевод ${label === 'Кук 3' ? '68.99' : '99.99'} SOL\n` +
+        `💰 Адрес: <code>${wallet}</code>\n⏳ Ожидаем mint...`, { parse_mode: 'HTML' });
     }
 
     watchMint(wallet, label, timeoutMs, targetChatId);
 
   } catch (err) {
-    const errorMsg = `🧨 Error in message handler: ${err.message}`;
-    console.error(errorMsg);
-    logToFile(errorMsg);
+    console.error('🧨 Error in message handler:', err.message);
   }
 });
 
@@ -96,9 +80,8 @@ function watchMint(wallet, label, timeoutMs, targetChatId) {
 
   const timeout = setTimeout(() => {
     if (activeWatchers.has(wallet)) {
-      const timeoutMsg = `⌛ [${label}] Mint не обнаружен в течение ${timeoutMs / 3600000} ч.\n🕳 Отслеживание ${wallet} завершено.`;
-      bot.sendMessage(targetChatId, timeoutMsg, { parse_mode: 'HTML' });
-      logToFile(timeoutMsg);
+      bot.sendMessage(targetChatId,
+        `⌛ [${label}] Mint не обнаружен в течение ${timeoutMs / 3600000} ч.\n🕳 Отслеживание ${wallet} завершено.`, { parse_mode: 'HTML' });
       ws.close();
       activeWatchers.delete(wallet);
     }
@@ -107,16 +90,12 @@ function watchMint(wallet, label, timeoutMs, targetChatId) {
   const pingInterval = setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) {
       ws.ping();
-      const ping = `📡 [${label}] Sent WebSocket ping`;
-      console.log(ping);
-      logToFile(ping);
+      console.log(`📡 [${label}] Sent WebSocket ping`);
     }
   }, 50000);
 
   ws.on('open', () => {
-    const openMsg = `✅ [${label}] Listening for mint on ${wallet}`;
-    console.log(openMsg);
-    logToFile(openMsg);
+    console.log(`✅ [${label}] Listening for mint on ${wallet}`);
     ws.send(JSON.stringify({
       jsonrpc: '2.0',
       id: 1,
@@ -147,31 +126,24 @@ function watchMint(wallet, label, timeoutMs, targetChatId) {
       clearTimeout(timeout);
       clearInterval(pingInterval);
 
-      const mintMsg = `🚀 [${label}] Mint обнаружен!\n🪙 Контракт токена: <code>${mintAddress}</code>`;
-      bot.sendMessage(targetChatId, mintMsg, { parse_mode: 'HTML' });
-      logToFile(mintMsg);
+      bot.sendMessage(targetChatId,
+        `🚀 [${label}] Mint обнаружен!\n🪙 Контракт токена: <code>${mintAddress}</code>`, { parse_mode: 'HTML' });
 
       ws.close();
       activeWatchers.delete(wallet);
     } catch (e) {
-      const errMsg = `⚠️ Ошибка обработки WebSocket-сообщения: ${e.message}`;
-      console.error(errMsg);
-      logToFile(errMsg);
+      console.error('⚠️ Ошибка обработки WebSocket-сообщения:', e.message);
     }
   });
 
   ws.on('close', () => {
-    const msg = `❌ [${label}] WebSocket closed for ${wallet}`;
-    console.log(msg);
-    logToFile(msg);
+    console.log(`❌ [${label}] WebSocket closed for ${wallet}`);
     clearInterval(pingInterval);
     activeWatchers.delete(wallet);
   });
 
   ws.on('error', (e) => {
-    const errMsg = `💥 WebSocket error: ${e.message}`;
-    console.error(errMsg);
-    logToFile(errMsg);
+    console.error(`💥 WebSocket error: ${e.message}`);
     clearInterval(pingInterval);
     activeWatchers.delete(wallet);
     ws.close();
