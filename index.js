@@ -35,13 +35,15 @@ bot.on('message', (msg) => {
       label = 'Бинанс';
     } else return;
 
+    
     let wallet = null;
     const links = msg.entities?.filter(e => e.type === 'text_link' && e.url?.includes('solscan.io/account/'));
-    const last = links?.[links.length - 1];
-    const match = last?.url?.match(/account\/(\w{32,44})/);
-    wallet = match?.[1];
-
+    if (links?.length >= 2) {
+      const match = links[1].url.match(/account\/(\w{32,44})/);
+      wallet = match?.[1];
+    }
     if (!wallet) return;
+
 
     const targetChat = label === 'Бинанс' ? BINANCE_CHAT_ID : PRIVATE_CHAT_ID;
     const alertMsg = `⚠️ [${label}] Обнаружен перевод ${label === 'Кук-3' ? '68.99' : '99.99'} SOL\n💰 Адрес: <code>${wallet}</code>\n⏳ Ожидаем mint...`;
