@@ -23,7 +23,8 @@ setInterval(() => {
 bot.on('message', (msg) => {
   try {
     const text = msg.text;
-    if (!text || msg.chat.id !== PUBLIC_CHAT_ID) return;
+    const senderId = msg.chat.id;
+    if (!text || senderId !== PUBLIC_CHAT_ID) return;
 
     let label = null;
     if (text.includes('Кук-3') && text.includes('68.99')) {
@@ -34,15 +35,13 @@ bot.on('message', (msg) => {
       label = 'Бинанс';
     } else return;
 
-    
     let wallet = null;
     const links = msg.entities?.filter(e => e.type === 'text_link' && e.url?.includes('solscan.io/account/'));
-    if (links?.length >= 2) {
-      const match = links[1].url.match(/account\/(\w{32,44})/);
-      wallet = match?.[1];
-    }
-    if (!wallet) return;
+    const last = links?.[links.length - 1];
+    const match = last?.url?.match(/account\/(\w{32,44})/);
+    wallet = match?.[1];
 
+    if (!wallet) return;
 
     const targetChat = label === 'Бинанс' ? BINANCE_CHAT_ID : PRIVATE_CHAT_ID;
     const alertMsg = `⚠️ [${label}] Обнаружен перевод ${label === 'Кук-3' ? '68.99' : '99.99'} SOL\n💰 Адрес: <code>${wallet}</code>\n⏳ Ожидаем mint...`;
@@ -141,51 +140,6 @@ bot.on('callback_query', (query) => {
       bot.sendMessage(chatId, `❌ Слежение остановлено: <code>${meta.label}: ${wallet}</code>`, { parse_mode: 'HTML' });
     }
   }
-});
-
-
-
-bot.onText(/\/inspect/, (msg) => {
-  const chatId = msg.chat.id;
-  if (!msg.reply_to_message) {
-    bot.sendMessage(chatId, '❗ Используйте команду /inspect в ответ на сообщение.');
-    return;
-  }
-
-  try {
-    const inspected = JSON.stringify(msg.reply_to_message, null, 2);
-    console.log("🕵️ INSPECTED MESSAGE:");
-    console.log(inspected);
-    bot.sendMessage(chatId, '📤 Структура сообщения отправлена в консоль Render.');
-  } catch (e) {
-    bot.sendMessage(chatId, '❌ Ошибка при обработке сообщения.');
-    console.error('Inspect error:', e.message);
-  }
-});
-
-
-
-bot.onText(/\/simulate/, (msg) => {
-  const chatId = msg.chat.id;
-  if (chatId !== PUBLIC_CHAT_ID) return;
-
-  const fakeText = 'Кук-1 · SOL\nОтправлено: 99.99 SOL (~$14,773) На: 28rt6o..NuwL';
-  const entities = [
-    {
-      offset: 0,
-      length: 5,
-      type: 'text_link',
-      url: 'https://solscan.io/account/BmFdpraQhkiDQE6SnfG5omcA1VwzqfXrwtNYBwWTymy6'
-    },
-    {
-      offset: 49,
-      length: 12,
-      type: 'text_link',
-      url: 'https://solscan.io/account/28rt6ouvYa4hq5nnUfuY52Kaq68B85MJSsbBqtY1NuwL'
-    }
-  ];
-
-  bot.sendMessage(PUBLIC_CHAT_ID, fakeText, { entities });
 });
 
 
