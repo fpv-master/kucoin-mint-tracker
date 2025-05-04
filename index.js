@@ -53,6 +53,96 @@ bot.on('message', (msg) => {
   }
 });
 
+
+bot.onText(/\/list/, (msg) => {
+  const chatId = msg.chat.id;
+  if (chatId === PUBLIC_CHAT_ID) return;
+
+  const list = Array.from(activeWatchers.entries());
+  if (!list.length) {
+    bot.sendMessage(chatId, '📭 Нет активных слежений.');
+  } else {
+    const formatted = list.map(([wallet, meta]) => `${meta.label}: ${wallet}`).join('\n');
+    bot.sendMessage(chatId, `📋 Активные адреса:\n<code>${formatted}</code>`, { parse_mode: 'HTML' });
+  }
+});
+
+bot.onText(/\/delete (.+)/, (msg, match) => {
+  const chatId = msg.chat.id;
+  if (chatId === PUBLIC_CHAT_ID) return;
+
+  const wallet = match[1].trim();
+  const meta = activeWatchers.get(wallet);
+  if (meta) {
+    meta.ws.close();
+    activeWatchers.delete(wallet);
+    bot.sendMessage(chatId, `❌ Слежение остановлено: <code>${meta.label}: ${wallet}</code>`, { parse_mode: 'HTML' });
+  } else {
+    bot.sendMessage(chatId, `⚠️ Адрес <code>${wallet}</code> не отслеживается.`, { parse_mode: 'HTML' });
+  }
+});
+
+bot.onText(/\/delete$/, (msg) => {
+  const chatId = msg.chat.id;
+  if (chatId === PUBLIC_CHAT_ID) return;
+
+  for (const [wallet, meta] of activeWatchers.entries()) {
+    meta.ws.close();
+    activeWatchers.delete(wallet);
+  }
+  bot.sendMessage(chatId, '🧹 Все слежения остановлены.');
+});
+
+
+
+bot.onText(/\/start/, (msg) => {
+  const chatId = msg.chat.id;
+  if (chatId === PUBLIC_CHAT_ID) return;
+
+  bot.sendMessage(chatId, '👋 Панель управления', {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '📋 Список адресов', callback_data: 'list' }],
+        [{ text: '🧹 Удалить все', callback_data: 'delete_all' }]
+      ]
+    }
+  });
+});
+
+bot.on('callback_query', (query) => {
+  const chatId = query.message.chat.id;
+  const data = query.data;
+
+  if (data === 'list') {
+    const list = Array.from(activeWatchers.entries());
+    if (!list.length) {
+      bot.sendMessage(chatId, '📭 Нет активных адресов.');
+    } else {
+      const buttons = list.map(([addr, meta]) => ([{ text: `❌ ${meta.label}: ${addr}`, callback_data: `delete_${addr}` }]));
+      bot.sendMessage(chatId, '📋 Активные адреса:', {
+        reply_markup: {
+          inline_keyboard: [...buttons, [{ text: '🧹 Удалить все', callback_data: 'delete_all' }]]
+        }
+      });
+    }
+  } else if (data === 'delete_all') {
+    for (const [wallet, meta] of activeWatchers.entries()) {
+      meta.ws.close();
+      activeWatchers.delete(wallet);
+    }
+    bot.sendMessage(chatId, '🧹 Все слежения остановлены.');
+  } else if (data.startsWith('delete_')) {
+    const wallet = data.replace('delete_', '');
+    const meta = activeWatchers.get(wallet);
+    if (meta) {
+      meta.ws.close();
+      activeWatchers.delete(wallet);
+      bot.sendMessage(chatId, `❌ Слежение остановлено: <code>${meta.label}: ${wallet}</code>`, { parse_mode: 'HTML' });
+    }
+  }
+});
+
+
 function watchMint(wallet, label, targetChat) {
   const ws = new WebSocket(`wss://rpc.helius.xyz/?api-key=${HELIUS_KEY}`);
   activeWatchers.set(wallet, { ws, label });
