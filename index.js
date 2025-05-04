@@ -59,7 +59,7 @@ bot.on('message', (msg) => {
     if (/Кукоин\s*Биржа/i.test(text) && /99\.99\s*SOL/i.test(text)) {
       label = 'Кукоин 1';
       timeoutMs = 20 * 60 * 60 * 1000;
-    } else if (/Кукоин\s*50/i.test(text) && /68\.99\s*SOL/i.test(text)) {
+    } else if (/Кукоин/i.test(text) && /68\.99\s*SOL/i.test(text)) {
       label = 'Кук 3';
       timeoutMs = 20 * 60 * 60 * 1000;
     } else if (/Бинанс\s*99/i.test(text) && /99\.99{1,2}/.test(text)) {
@@ -80,7 +80,12 @@ bot.on('message', (msg) => {
       wallet = match?.[1];
     }
 
-    if (!wallet || activeWatchers.has(wallet)) return;
+    if (!wallet) return;
+
+    if (activeWatchers.has(wallet)) {
+      logToFile(`🔁 Уже отслеживается: ${wallet}`);
+      return;
+    }
 
     if (label !== 'Бинанс 99') {
       const notifyMsg = `⚠️ [${label}] Обнаружен перевод ${label === 'Кук 3' ? '68.99' : '99.99'} SOL\n💰 Адрес: <code>${wallet}</code>\n⏳ Ожидаем mint...`;
