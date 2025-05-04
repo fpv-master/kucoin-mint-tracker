@@ -24,7 +24,7 @@ function logToTelegram(message) {
 }
 
 const seenSignatures = new Set();
-const activeWatchers = new Map(); // key: wallet, value: { ws, label }
+const activeWatchers = new Map();
 
 setInterval(() => {
   const pingMsg = '📡 Global ping';
@@ -32,7 +32,6 @@ setInterval(() => {
   logToFile(pingMsg);
 }, 180000);
 
-// Команды в личке
 bot.onText(/\/start/, (msg) => {
   if (msg.chat.id === PUBLIC_CHAT_ID) return;
   bot.sendMessage(msg.chat.id, '👋 Панель управления', {
@@ -59,6 +58,32 @@ bot.onText(/\/list/, (msg) => {
   }
 });
 
+bot.onText(/\/delete (.+)/, (msg, match) => {
+  const chatId = msg.chat.id;
+  if (chatId === PUBLIC_CHAT_ID) return;
+
+  const wallet = match[1].trim();
+  const meta = activeWatchers.get(wallet);
+  if (meta) {
+    meta.ws.close();
+    activeWatchers.delete(wallet);
+    bot.sendMessage(chatId, `❌ Слежение остановлено: <code>${meta.label}: ${wallet}</code>`, { parse_mode: 'HTML' });
+  } else {
+    bot.sendMessage(chatId, `⚠️ Адрес <code>${wallet}</code> не отслеживается.`, { parse_mode: 'HTML' });
+  }
+});
+
+bot.onText(/\/delete$/, (msg) => {
+  const chatId = msg.chat.id;
+  if (chatId === PUBLIC_CHAT_ID) return;
+
+  for (const [wallet, meta] of activeWatchers.entries()) {
+    meta.ws.close();
+    activeWatchers.delete(wallet);
+  }
+  bot.sendMessage(chatId, '🧹 Все слежения остановлены.');
+});
+
 bot.on('callback_query', (query) => {
   const chatId = query.message.chat.id;
   const data = query.data;
@@ -78,7 +103,7 @@ bot.on('callback_query', (query) => {
       meta.ws.close();
       activeWatchers.delete(wallet);
     }
-    bot.sendMessage(chatId, '🧹 Все слежения отключены.');
+    bot.sendMessage(chatId, '🧹 Все слежения остановлены.');
   } else if (data.startsWith('delete_')) {
     const wallet = data.replace('delete_', '');
     const meta = activeWatchers.get(wallet);
